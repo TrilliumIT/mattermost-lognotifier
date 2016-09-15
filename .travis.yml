@@ -1,0 +1,40 @@
+language: go
+
+go:
+  - 1.7
+
+cache:
+  directories:
+    - vendor
+
+env:
+  global:
+    - GO15VENDOREXPERIMENT=1
+    - GOOS=linux
+
+before_install:
+  - go get github.com/Masterminds/glide
+
+install:
+  - $GOPATH/bin/glide install
+  - go get -t $($GOPATH/bin/glide novendor)
+
+script:
+  - mv $GOPATH/bin/mattermost-lognotifier ./
+  - md5sum mattermost-lognotifier > md5.txt
+  - sha256sum mattermost-lognotifier > sha256.txt
+  - sha512sum mattermost-lognotifier > sha512.txt
+  - ls -alh
+
+deploy:
+  - provider: releases
+    skip_cleanup: true
+    api_key:
+      secure: CQ7fgNB+w2o/NpvHf3pBaYGzyw3RQjkltIkw1tXAKCzEn9/YpJs15AZ4q8mqzirVltGdVuGB4yAo3tJMgyvXOFpm6BM0T/N3LlbssBmR+CYA3uz+lkavZsXwycxayvEfUqpYqIDtH268R3CBA1+8GHHEWjLQccNCo9nJNWMxMOWv+K2Nk6YMLHy2zghtqe2dH0ZxdgcVjPB9KwYHdH4rK4N/sg94cH+UdqINezaUfC6+wXUymafiNIGbyH9qZg/7iyFyeYK0DZp4SmVG3GTia9BJ51BB1snIbncmfoD731OGtZPTXHZFFjlYi3nf42ESPryIJnQz+7zJFp8VSu8HccmckW8Or9kd1u/yAvY1ECt3PZLao3R2iNYkVtRPBE+pgG96zwVwsN96TQihjFcYnTfOiK+7pMc7x8aZA6VcQXoWLcDwjObuhTVD7dV0b35Ry5mYtSv2ZAbk+xbyvm6+uDRSFgxqSu7t9I1WETrvZhOlNc1mtLATW9NPoDrqNDjF44RodqX2B8R4qPUZxKghNvRvbrAZfDUMiHPr20F53ztUkgW8gUzjtY1X7hfSD6dhQrgV0JRMEuLm2wvwPnby/nKu0tiVtWAWVFzlo/KpSWMe1wusceUGpDIsj2Y/Pg6YsZM/554AKFpyO1bS0LF5Q2QSzNyxuBPZWV6EQar9JEY=
+    file:
+      - mattermost-lognotifier
+      - md5.txt
+      - sha256.txt
+      - sha512.txt
+    on:
+      tags: true

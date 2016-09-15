@@ -1,0 +1,5 @@
+package: .
+import:
+- package: github.com/Sirupsen/logrus
+- package: github.com/hpcloud/tail
+- package: github.com/urfave/cli

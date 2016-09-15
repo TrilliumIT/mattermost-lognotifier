@@ -17,13 +17,16 @@ import (
 	"github.com/urfave/cli"
 )
 
-const version = "0.1.3"
+const version = "0.1.4"
 
 var (
 	username string
 	url      string
 	file     string
 	color    string
+	attach   bool
+	prefix   string
+	syntax   string
 )
 
 func main() {
@@ -35,6 +38,15 @@ func main() {
 		cli.BoolFlag{
 			Name:  "debug, d",
 			Usage: "Enable debugging.",
+		},
+		cli.StringFlag{
+			Name:  "prefix, p",
+			Usage: "Prefix for messages.",
+			Value: ":warning:",
+		},
+		cli.StringFlag{
+			Name:  "syntax",
+			Usage: "Syntax for logs.",
 		},
 		cli.StringFlag{
 			Name:  "username, u",
@@ -84,6 +96,10 @@ func main() {
 			Usage: "Amount of time in milliseconds to wait before sending buffered lines. -1 disables the timer. 0 indicates no timer, and messages will be sent as soon a chunk of lines is processed.",
 			Value: 1,
 		},
+		cli.BoolFlag{
+			Name:  "no-attach",
+			Usage: "Post logs as text instead of an attachment.",
+		},
 	}
 	app.Action = Run
 	err := app.Run(os.Args)
@@ -100,6 +116,8 @@ func Run(ctx *cli.Context) error {
 	username = ctx.String("username")
 	url = ctx.String("url")
 	color = ctx.String("color")
+	prefix = ctx.String("prefix")
+	attach = !ctx.Bool("no-attach")
 
 	if ctx.String("file") == "" {
 		return fmt.Errorf("File must be specified")
@@ -220,12 +238,20 @@ func notify(lb []string) {
 	log.WithField("lb", lb).Debug("Notify triggered")
 	p := make(map[string]interface{})
 	p["username"] = username
-	a := make(map[string]interface{})
-	a["fallback"] = fmt.Sprintf("New log entry in %v. \n%v\n[...]%v\n", file, lb[0], lb[len(lb)-1])
-	a["color"] = color
-	a["pretext"] = fmt.Sprintf("New log entry in %v", file)
-	a["text"] = "  " + strings.Join(lb, "\n  ")
-	p["attachments"] = []map[string]interface{}{a}
+	if attach {
+		a := make(map[string]interface{})
+		a["fallback"] = fmt.Sprintf("New log entry in %v. \n%v\n[...]%v\n", file, lb[0], lb[len(lb)-1])
+		a["color"] = color
+		a["pretext"] = fmt.Sprintf("%v New log entry in %v", prefix, file)
+		// TODO: When MM PLT-3340 is fixed, wrap txt in code blocks
+		txt := "  " + strings.Join(lb, "\n  ")
+		a["text"] = txt
+		p["attachments"] = []map[string]interface{}{a}
+	} else {
+		txt := strings.Join(lb, "\n")
+		txt = fmt.Sprintf("%v New log entry in %v\n```%v\n%v\n```", prefix, file, syntax, txt)
+		p["text"] = txt
+	}
 	pj, err := json.Marshal(p)
 	if err != nil {
 		log.WithError(err).WithField("payload", p).Error("Failed to marshall json")

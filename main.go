@@ -17,7 +17,7 @@ import (
 	"github.com/urfave/cli"
 )
 
-const version = "0.1"
+const version = "0.1.1"
 
 var (
 	username string
@@ -82,7 +82,7 @@ func main() {
 		cli.UintFlag{
 			Name:  "timeout, t",
 			Usage: "Amount of time in milliseconds to wait before sending buffered lines. -1 disables the timer. 0 indicates no timer, and messages will be sent as soon a chunk of lines is processed.",
-			Value: 0,
+			Value: 1,
 		},
 	}
 	app.Action = Run

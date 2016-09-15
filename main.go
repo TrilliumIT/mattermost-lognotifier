@@ -17,7 +17,7 @@ import (
 	"github.com/urfave/cli"
 )
 
-const version = "0.1.2"
+const version = "0.1.3"
 
 var (
 	username string
@@ -214,6 +214,9 @@ MAIN:
 }
 
 func notify(lb []string) {
+	if strings.TrimSpace(strings.Join(lb, "")) == "" {
+		return
+	}
 	log.WithField("lb", lb).Debug("Notify triggered")
 	p := make(map[string]interface{})
 	p["username"] = username

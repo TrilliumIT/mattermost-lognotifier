@@ -17,7 +17,7 @@ import (
 	"github.com/urfave/cli"
 )
 
-const version = "0.1.1"
+const version = "0.1.2"
 
 var (
 	username string
@@ -100,6 +100,10 @@ func Run(ctx *cli.Context) error {
 	username = ctx.String("username")
 	url = ctx.String("url")
 	color = ctx.String("color")
+
+	if ctx.String("file") == "" {
+		return fmt.Errorf("File must be specified")
+	}
 
 	go mon(ctx)
 

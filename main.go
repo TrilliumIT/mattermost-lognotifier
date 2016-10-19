@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"syscall"
@@ -22,7 +23,6 @@ const version = "0.1.4"
 var (
 	username string
 	url      string
-	file     string
 	color    string
 	attach   bool
 	prefix   string
@@ -61,9 +61,13 @@ func main() {
 			Usage: "Color for mattermost webhook",
 			Value: "#FF0000",
 		},
-		cli.StringFlag{
+		cli.StringSliceFlag{
 			Name:  "file, f",
 			Usage: "Path to log file to watch",
+		},
+		cli.StringSliceFlag{
+			Name:  "glob, g",
+			Usage: "Glob path to log file to watch",
 		},
 		cli.BoolFlag{
 			Name:  "reopen, F",
@@ -119,8 +123,8 @@ func Run(ctx *cli.Context) error {
 	prefix = ctx.String("prefix")
 	attach = !ctx.Bool("no-attach")
 
-	if ctx.String("file") == "" {
-		return fmt.Errorf("File must be specified")
+	if len(ctx.StringSlice("file")) == 0 && len(ctx.StringSlice("glob")) == 0 {
+		return fmt.Errorf("File or glob must be specified")
 	}
 
 	go mon(ctx)
@@ -132,7 +136,7 @@ func Run(ctx *cli.Context) error {
 	return nil
 }
 
-func mon(ctx *cli.Context) error {
+func mon(ctx *cli.Context) {
 	var (
 		lb       []string
 		b        *regexp.Regexp
@@ -148,17 +152,18 @@ func mon(ctx *cli.Context) error {
 		minLines = 1
 	}
 	timeout = ctx.Uint("timeout")
-	file = ctx.String("file")
 	if ctx.String("begin") != "" {
 		b, err = regexp.Compile(ctx.String("begin"))
 		if err != nil {
-			return err
+			log.WithError(err).WithField("begin", ctx.String("begin")).Error("Error compiling begin regex")
+			return
 		}
 	}
 	if ctx.String("end") != "" {
 		e, err = regexp.Compile(ctx.String("end"))
 		if err != nil {
-			return err
+			log.WithError(err).WithField("end", ctx.String("end")).Error("Error compiling end regex")
+			return
 		}
 	}
 	c := tail.Config{
@@ -169,69 +174,89 @@ func mon(ctx *cli.Context) error {
 		c.Location = &tail.SeekInfo{Whence: 2}
 	}
 	c.ReOpen = ctx.Bool("reopen")
-	t, err := tail.TailFile(file, c)
-MAIN:
-	for {
-		s := ""
-		log.WithField("lb-len", len(lb)).Debug("Starting Loop")
-		if len(lb) > 0 {
-			log.WithField("s", s).Debug("String to compare")
-			s = lb[len(lb)-1]
-		}
-		switch {
-		case e != nil && e.MatchString(s):
-			log.Debug("Matched end")
-			go notify(lb)
-			lb = nil
-			continue MAIN
-		case b != nil && len(lb) > 1 && b.MatchString(s):
-			log.Debug("Matched begin")
-			go notify(lb[:len(lb)-1])
-			lb = nil
-			lb = append(lb, s)
-			continue MAIN
-		case maxLines > 0 && len(lb) >= maxLines:
-			log.Debug("Over max lines")
-			go notify(lb)
-			lb = nil
-			continue MAIN
-		case len(lb) < minLines:
-			log.Debug("Under min lines, waiting for write")
-			l := <-t.Lines
-			log.Debug("Line written during minline wait")
-			lb = append(lb, l.Text)
-			continue MAIN
-		}
 
-		// Keep grabbing lines that are avaliable, before giving the timer a cahnce
-		log.Debug("Finished case statement, checking for new lines.")
-		select {
-		case l := <-t.Lines:
-			log.Debug("New lines found in first check")
-			lb = append(lb, l.Text)
-			continue MAIN
-		default:
+	files := ctx.StringSlice("file")
+	for _, g := range ctx.StringSlice("glob") {
+		m, err := filepath.Glob(g)
+		if err != nil {
+			log.WithError(err).WithField("glob", g).Error("Error parsing glob")
+			continue
 		}
+		files = append(files, m...)
+	}
 
-		log.Debug("Starting timer and waiting for new lines.")
-		// Grab the next line, or print out when the timer expires
-		to := time.NewTimer(time.Duration(timeout) * time.Millisecond)
-		select {
-		case l := <-t.Lines:
-			log.Debug("New lines found during timer wait")
-			lb = append(lb, l.Text)
-			to.Stop()
-			continue MAIN
-		case _ = <-to.C:
-			log.Debug("Timer expired, sending updates.")
-			go notify(lb)
-			lb = nil
-			continue MAIN
-		}
+	for _, file := range files {
+		log.WithField("file", file).Debug("Starting watch on file")
+		go func(file string) {
+			t, err := tail.TailFile(file, c)
+			if err != nil {
+				log.WithError(err).WithField("file", file).Error("Error tailing file.")
+				return
+			}
+		MAIN:
+			for {
+				s := ""
+				log.WithField("lb-len", len(lb)).Debug("Starting Loop")
+				if len(lb) > 0 {
+					log.WithField("s", s).Debug("String to compare")
+					s = lb[len(lb)-1]
+				}
+				switch {
+				case e != nil && e.MatchString(s):
+					log.Debug("Matched end")
+					go notify(lb, file)
+					lb = nil
+					continue MAIN
+				case b != nil && len(lb) > 1 && b.MatchString(s):
+					log.Debug("Matched begin")
+					go notify(lb[:len(lb)-1], file)
+					lb = nil
+					lb = append(lb, s)
+					continue MAIN
+				case maxLines > 0 && len(lb) >= maxLines:
+					log.Debug("Over max lines")
+					go notify(lb, file)
+					lb = nil
+					continue MAIN
+				case len(lb) < minLines:
+					log.Debug("Under min lines, waiting for write")
+					l := <-t.Lines
+					log.Debug("Line written during minline wait")
+					lb = append(lb, l.Text)
+					continue MAIN
+				}
+
+				// Keep grabbing lines that are avaliable, before giving the timer a cahnce
+				log.Debug("Finished case statement, checking for new lines.")
+				select {
+				case l := <-t.Lines:
+					log.Debug("New lines found in first check")
+					lb = append(lb, l.Text)
+					continue MAIN
+				default:
+				}
+
+				log.Debug("Starting timer and waiting for new lines.")
+				// Grab the next line, or print out when the timer expires
+				to := time.NewTimer(time.Duration(timeout) * time.Millisecond)
+				select {
+				case l := <-t.Lines:
+					log.Debug("New lines found during timer wait")
+					lb = append(lb, l.Text)
+					to.Stop()
+					continue MAIN
+				case _ = <-to.C:
+					log.Debug("Timer expired, sending updates.")
+					go notify(lb, file)
+					lb = nil
+					continue MAIN
+				}
+			}
+		}(file)
 	}
 }
 
-func notify(lb []string) {
+func notify(lb []string, file string) {
 	if strings.TrimSpace(strings.Join(lb, "")) == "" {
 		return
 	}
@@ -263,7 +288,7 @@ func notify(lb []string) {
 		if strings.Contains(err.Error(), "REFUSED_STREAM") {
 			log.WithError(err).WithField("url", url).WithField("json", string(pj)).Debug("Failed to post json to url. Retrying.")
 			time.Sleep(1 * time.Millisecond)
-			go notify(lb)
+			go notify(lb, file)
 			return
 		}
 		log.WithError(err).WithField("url", url).WithField("json", string(pj)).Error("Failed to post json to url.")

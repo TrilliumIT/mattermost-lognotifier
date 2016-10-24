@@ -85,7 +85,7 @@ func main() {
 			Name:  "end, e",
 			Usage: "Regex pattern to look for to indicate a new log message beginning. If omitted, each line is considered a unique message.",
 		},
-		cli.StringFlag{
+		cli.StringSliceFlag{
 			Name:  "exclude, x",
 			Usage: "Regex pattern to exclude from notices.",
 		},
@@ -146,7 +146,7 @@ var (
 	timeout  uint
 	b        *regexp.Regexp
 	e        *regexp.Regexp
-	x        *regexp.Regexp
+	x        []*regexp.Regexp
 	c        tail.Config
 )
 
@@ -174,12 +174,13 @@ func mon(ctx *cli.Context) {
 			return
 		}
 	}
-	if ctx.String("exclude") != "" {
-		x, err = regexp.Compile(ctx.String("exclude"))
+	for _, ex := range ctx.StringSlice("exclude") {
+		rx, err := regexp.Compile(ex)
 		if err != nil {
 			log.WithError(err).WithField("exclude", ctx.String("exclude")).Error("Error compiling exclude regex")
 			return
 		}
+		x = append(x, rx)
 	}
 	c = tail.Config{
 		Follow: true,
@@ -231,9 +232,7 @@ MAIN:
 			continue MAIN
 		case b != nil && len(lb) > 1 && b.MatchString(s):
 			log.Debug("Matched begin")
-			if b.MatchString(lb[0]) {
-				go notify(lb[:len(lb)-1], file)
-			}
+			go notify(lb[:len(lb)-1], file)
 			lb = nil
 			lb = append(lb, s)
 			continue MAIN
@@ -281,12 +280,15 @@ MAIN:
 }
 
 func notify(lb []string, file string) {
-	if x != nil {
+	for _, ex := range x {
 		for _, l := range lb {
-			if x.MatchString(l) {
+			if ex.MatchString(l) {
 				return
 			}
 		}
+	}
+	if b != nil && !b.MatchString(lb[0]) {
+		return
 	}
 	if strings.TrimSpace(strings.Join(lb, "")) == "" {
 		return

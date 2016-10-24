@@ -231,7 +231,9 @@ MAIN:
 			continue MAIN
 		case b != nil && len(lb) > 1 && b.MatchString(s):
 			log.Debug("Matched begin")
-			go notify(lb[:len(lb)-1], file)
+			if b.MatchString(lb[0]) {
+				go notify(lb[:len(lb)-1], file)
+			}
 			lb = nil
 			lb = append(lb, s)
 			continue MAIN

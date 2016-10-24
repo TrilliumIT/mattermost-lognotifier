@@ -85,6 +85,10 @@ func main() {
 			Name:  "end, e",
 			Usage: "Regex pattern to look for to indicate a new log message beginning. If omitted, each line is considered a unique message.",
 		},
+		cli.StringFlag{
+			Name:  "exclude, x",
+			Usage: "Regex pattern to exclude from notices.",
+		},
 		cli.IntFlag{
 			Name:  "maxlines, max",
 			Usage: "Maximum lines to be considered a unique log message. -1 indicates no limit",
@@ -142,6 +146,7 @@ var (
 	timeout  uint
 	b        *regexp.Regexp
 	e        *regexp.Regexp
+	x        *regexp.Regexp
 	c        tail.Config
 )
 
@@ -166,6 +171,13 @@ func mon(ctx *cli.Context) {
 		e, err = regexp.Compile(ctx.String("end"))
 		if err != nil {
 			log.WithError(err).WithField("end", ctx.String("end")).Error("Error compiling end regex")
+			return
+		}
+	}
+	if ctx.String("exclude") != "" {
+		x, err = regexp.Compile(ctx.String("exclude"))
+		if err != nil {
+			log.WithError(err).WithField("exclude", ctx.String("exclude")).Error("Error compiling exclude regex")
 			return
 		}
 	}
@@ -267,6 +279,13 @@ MAIN:
 }
 
 func notify(lb []string, file string) {
+	if x != nil {
+		for _, l := range lb {
+			if x.MatchString(l) {
+				return
+			}
+		}
+	}
 	if strings.TrimSpace(strings.Join(lb, "")) == "" {
 		return
 	}

@@ -181,7 +181,7 @@ func mon(ctx *cli.Context) {
 			return
 		}
 	}
-	c := tail.Config{
+	c = tail.Config{
 		Follow: true,
 		Logger: log.StandardLogger(),
 		Poll:   false,

@@ -136,15 +136,18 @@ func Run(ctx *cli.Context) error {
 	return nil
 }
 
+var (
+	maxLines int
+	minLines int
+	timeout  uint
+	b        *regexp.Regexp
+	e        *regexp.Regexp
+	c        tail.Config
+)
+
 func mon(ctx *cli.Context) {
 	var (
-		lb       []string
-		b        *regexp.Regexp
-		e        *regexp.Regexp
-		maxLines int
-		minLines int
-		timeout  uint
-		err      error
+		err error
 	)
 	maxLines = ctx.Int("maxlines")
 	minLines = ctx.Int("minlines")
@@ -169,6 +172,7 @@ func mon(ctx *cli.Context) {
 	c := tail.Config{
 		Follow: true,
 		Logger: log.StandardLogger(),
+		Poll:   false,
 	}
 	if ctx.Bool("start-at-end") {
 		c.Location = &tail.SeekInfo{Whence: 2}
@@ -187,72 +191,78 @@ func mon(ctx *cli.Context) {
 
 	for _, file := range files {
 		log.WithField("file", file).Debug("Starting watch on file")
-		go func(file string) {
-			t, err := tail.TailFile(file, c)
-			if err != nil {
-				log.WithError(err).WithField("file", file).Error("Error tailing file.")
-				return
-			}
-		MAIN:
-			for {
-				s := ""
-				log.WithField("lb-len", len(lb)).Debug("Starting Loop")
-				if len(lb) > 0 {
-					log.WithField("s", s).Debug("String to compare")
-					s = lb[len(lb)-1]
-				}
-				switch {
-				case e != nil && e.MatchString(s):
-					log.Debug("Matched end")
-					go notify(lb, file)
-					lb = nil
-					continue MAIN
-				case b != nil && len(lb) > 1 && b.MatchString(s):
-					log.Debug("Matched begin")
-					go notify(lb[:len(lb)-1], file)
-					lb = nil
-					lb = append(lb, s)
-					continue MAIN
-				case maxLines > 0 && len(lb) >= maxLines:
-					log.Debug("Over max lines")
-					go notify(lb, file)
-					lb = nil
-					continue MAIN
-				case len(lb) < minLines:
-					log.Debug("Under min lines, waiting for write")
-					l := <-t.Lines
-					log.Debug("Line written during minline wait")
-					lb = append(lb, l.Text)
-					continue MAIN
-				}
+		go monFile(file)
+	}
+}
 
-				// Keep grabbing lines that are avaliable, before giving the timer a cahnce
-				log.Debug("Finished case statement, checking for new lines.")
-				select {
-				case l := <-t.Lines:
-					log.Debug("New lines found in first check")
-					lb = append(lb, l.Text)
-					continue MAIN
-				default:
-				}
-
-				log.Debug("Starting timer and waiting for new lines.")
-				// Grab the next line, or print out when the timer expires
-				to := time.NewTimer(time.Duration(timeout) * time.Millisecond)
-				select {
-				case l := <-t.Lines:
-					log.Debug("New lines found during timer wait")
-					lb = append(lb, l.Text)
-					to.Stop()
-					continue MAIN
-				case _ = <-to.C:
-					log.Debug("Timer expired, sending updates.")
-					go notify(lb, file)
-					lb = nil
-					continue MAIN
-				}
+func monFile(file string) {
+	lb := make([]string, 0)
+	t, err := tail.TailFile(file, c)
+	if err != nil {
+		log.WithError(err).WithField("file", file).Error("Error tailing file.")
+		return
+	}
+	log.WithField("t", t).Debug("Tail setup")
+MAIN:
+	for {
+		s := ""
+		log.WithField("lb-len", len(lb)).Debug("Starting Loop")
+		if len(lb) > 0 {
+			log.WithField("s", s).Debug("String to compare")
+			s = lb[len(lb)-1]
+		}
+		switch {
+		case e != nil && e.MatchString(s):
+			log.Debug("Matched end")
+			go notify(lb, file)
+			lb = nil
+			continue MAIN
+		case b != nil && len(lb) > 1 && b.MatchString(s):
+			log.Debug("Matched begin")
+			go notify(lb[:len(lb)-1], file)
+			lb = nil
+			lb = append(lb, s)
+			continue MAIN
+		case maxLines > 0 && len(lb) >= maxLines:
+			log.Debug("Over max lines")
+			go notify(lb, file)
+			lb = nil
+			continue MAIN
+		case len(lb) < minLines:
+			log.Debug("Under min lines, waiting for write")
+			l := <-t.Lines
+			if l != nil {
+				log.Debug("Line written during minline wait")
+				lb = append(lb, l.Text)
 			}
-		}(file)
+			continue MAIN
+		}
+
+		// Keep grabbing lines that are avaliable, before giving the timer a cahnce
+		log.Debug("Finished case statement, checking for new lines.")
+		select {
+		case l := <-t.Lines:
+			log.Debug("New lines found in first check")
+			lb = append(lb, l.Text)
+			continue MAIN
+		default:
+		}
+
+		log.Debug("Starting timer and waiting for new lines.")
+		// Grab the next line, or print out when the timer expires
+		to := time.NewTimer(time.Duration(timeout) * time.Millisecond)
+		select {
+		case l := <-t.Lines:
+			log.Debug("New lines found during timer wait")
+			lb = append(lb, l.Text)
+			to.Stop()
+			continue MAIN
+		case _ = <-to.C:
+			log.Debug("Timer expired, sending updates.")
+			go notify(lb, file)
+			lb = nil
+			continue MAIN
+		}
 	}
 }
 

@@ -18,7 +18,7 @@ import (
 	"github.com/urfave/cli"
 )
 
-const version = "0.1.4"
+const version = "0.2.6"
 
 var (
 	username string
